@@ -10,6 +10,7 @@ import {
   Upload,
   ArrowRight,
 } from "lucide-react";
+import { createSupabaseServerClient, getAuthUser } from "@/lib/supabase/server-client";
 
 const tools = [
   {
@@ -78,7 +79,36 @@ const tools = [
   },
 ];
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  // Fetch real stats from Supabase
+  let studySessionCount = 0;
+  let quizzesTaken = 0;
+  let flashcardsCreated = 0;
+
+  const user = await getAuthUser();
+  if (user) {
+    const supabase = createSupabaseServerClient();
+
+    const [sessionsRes, quizzesRes, flashcardsRes] = await Promise.all([
+      supabase
+        .from("study_sessions")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id),
+      supabase
+        .from("quiz_history")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id),
+      supabase
+        .from("flashcards")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id),
+    ]);
+
+    studySessionCount = sessionsRes.count ?? 0;
+    quizzesTaken = quizzesRes.count ?? 0;
+    flashcardsCreated = flashcardsRes.count ?? 0;
+  }
+
   return (
     <div className="space-y-8">
       {/* Welcome Section */}
@@ -123,19 +153,19 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Quick Stats Placeholder */}
+      {/* Quick Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
         <div className="p-5 rounded-xl border border-border/50 bg-card/50">
           <p className="text-sm text-muted-foreground">Study Sessions</p>
-          <p className="text-2xl font-bold mt-1">0</p>
+          <p className="text-2xl font-bold mt-1">{studySessionCount}</p>
         </div>
         <div className="p-5 rounded-xl border border-border/50 bg-card/50">
           <p className="text-sm text-muted-foreground">Quizzes Taken</p>
-          <p className="text-2xl font-bold mt-1">0</p>
+          <p className="text-2xl font-bold mt-1">{quizzesTaken}</p>
         </div>
         <div className="p-5 rounded-xl border border-border/50 bg-card/50">
           <p className="text-sm text-muted-foreground">Flashcards Created</p>
-          <p className="text-2xl font-bold mt-1">0</p>
+          <p className="text-2xl font-bold mt-1">{flashcardsCreated}</p>
         </div>
       </div>
     </div>

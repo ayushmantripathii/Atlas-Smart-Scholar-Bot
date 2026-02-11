@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS public.quiz_history (
   user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   session_id UUID REFERENCES public.study_sessions(id) ON DELETE SET NULL,
   score INTEGER NOT NULL DEFAULT 0,
+  total_questions INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

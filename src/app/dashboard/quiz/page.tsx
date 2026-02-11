@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -22,6 +23,7 @@ import { UploadSelector } from "@/components/upload-selector";
 import type { QuizQuestionData } from "@/types/study";
 
 export default function QuizPage() {
+  const router = useRouter();
   const [content, setContent] = useState("");
   const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
@@ -31,6 +33,10 @@ export default function QuizPage() {
   const [questions, setQuestions] = useState<QuizQuestionData[]>([]);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
   const [revealed, setRevealed] = useState<Record<number, boolean>>({});
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const submittedRef = useRef(false);
 
   const hasInput = !!selectedFileUrl || !!content.trim();
 
@@ -54,12 +60,62 @@ export default function QuizPage() {
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? "Something went wrong."); return; }
       setQuestions(data.questions ?? []);
+      setSessionId(data.session_id ?? null);
+      setSubmitted(false);
+      submittedRef.current = false;
     } catch {
       setError("Failed to connect to the server.");
     } finally {
       setLoading(false);
     }
   };
+
+  /** Submit quiz results to the database when all answers are revealed */
+  const submitQuizHistory = async (finalScore: number, totalQuestions: number) => {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/quiz-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          score: finalScore,
+          total_questions: totalQuestions,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        console.error("Failed to save quiz result:", data.error);
+      } else {
+        setSubmitted(true);
+        router.refresh();
+      }
+    } catch (err) {
+      console.error("Failed to save quiz result:", err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Auto-submit when all questions are answered and revealed
+  const allRevealed = questions.length > 0 && Object.keys(revealed).length === questions.length;
+  const computedScore = allRevealed
+    ? Object.entries(revealed)
+        .filter(([, v]) => v)
+        .reduce((acc, [qi]) => {
+          const q = questions[Number(qi)];
+          return acc + (selectedAnswers[Number(qi)] === q?.correct_answer ? 1 : 0);
+        }, 0)
+    : null;
+
+  useEffect(() => {
+    if (allRevealed && computedScore !== null && !submittedRef.current) {
+      submitQuizHistory(computedScore, questions.length);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRevealed, computedScore]);
 
   const selectAnswer = (qi: number, option: string) => {
     if (revealed[qi]) return;
@@ -148,10 +204,22 @@ export default function QuizPage() {
       {/* Score banner */}
       {score !== null && Object.keys(revealed).length === questions.length && questions.length > 0 && (
         <div className="rounded-lg border border-neon-cyan/30 bg-neon-cyan/10 p-4 flex items-center justify-between">
-          <p className="text-sm font-medium">
-            Score: <span className="text-neon-cyan text-lg font-bold">{score}/{questions.length}</span>
-          </p>
-          <Button variant="outline" size="sm" className="gap-2 border-border/50" onClick={() => { setSelectedAnswers({}); setRevealed({}); }}>
+          <div className="flex items-center gap-3">
+            <p className="text-sm font-medium">
+              Score: <span className="text-neon-cyan text-lg font-bold">{score}/{questions.length}</span>
+            </p>
+            {submitting && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" /> Saving…
+              </span>
+            )}
+            {submitted && (
+              <span className="flex items-center gap-1 text-xs text-green-400">
+                <CheckCircle2 className="h-3 w-3" /> Saved
+              </span>
+            )}
+          </div>
+          <Button variant="outline" size="sm" className="gap-2 border-border/50" onClick={() => { setSelectedAnswers({}); setRevealed({}); setSubmitted(false); submittedRef.current = false; }}>
             <RotateCcw className="h-4 w-4" /> Retry
           </Button>
         </div>
