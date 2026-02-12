@@ -18,11 +18,15 @@ import {
   Zap,
   User,
   Trash2,
+  FileUp,
 } from "lucide-react";
+import { UploadSelector } from "@/components/upload-selector";
 import type { ChatMessage } from "@/types/study";
 
 export default function ChatPage() {
   const [context, setContext] = useState("");
+  const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [contextSet, setContextSet] = useState(false);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -52,6 +56,7 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           context: context.trim() || undefined,
+          fileUrl: selectedFileUrl || undefined,
           question: userMsg.content,
           history: messages,
         }),
@@ -80,8 +85,12 @@ export default function ChatPage() {
     setMessages([]);
     setContextSet(false);
     setContext("");
+    setSelectedFileUrl(null);
+    setSelectedFileName(null);
     setError(null);
   };
+
+  const hasContext = !!context.trim() || !!selectedFileUrl;
 
   return (
     <div className="space-y-6 max-w-4xl h-full flex flex-col">
@@ -103,16 +112,25 @@ export default function ChatPage() {
               <div>
                 <CardTitle className="text-lg">Study Context (Optional)</CardTitle>
                 <CardDescription>
-                  Paste study material to ground the conversation, or skip for general Q&A
+                  Select an uploaded PDF, paste study material, or skip for general Q&A
                 </CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            <UploadSelector
+              selectedFileUrl={selectedFileUrl}
+              onSelect={(url, name) => {
+                setSelectedFileUrl(url);
+                setSelectedFileName(name);
+              }}
+              disabled={false}
+            />
+
             <textarea
               value={context}
               onChange={(e) => setContext(e.target.value)}
-              placeholder="Paste study material here for context-aware answers (optional)..."
+              placeholder={selectedFileUrl ? "File selected — you can also add extra context here..." : "Paste study material here for context-aware answers (optional)..."}
               rows={6}
               className="w-full rounded-lg border border-border/50 bg-background/50 px-4 py-3 text-sm leading-relaxed placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-neon-cyan/30 focus:border-neon-cyan/50 resize-y"
             />
@@ -120,7 +138,7 @@ export default function ChatPage() {
               <Button variant="outline" className="border-border/50" onClick={() => setContextSet(true)}>
                 Skip — General Chat
               </Button>
-              <Button onClick={handleSetContext} className="bg-neon-glow text-white hover:opacity-90 gap-2">
+              <Button onClick={handleSetContext} disabled={!hasContext} className="bg-neon-glow text-white hover:opacity-90 gap-2">
                 <MessageSquare className="h-4 w-4" /> Start Chat
               </Button>
             </div>
@@ -141,7 +159,11 @@ export default function ChatPage() {
                 <div>
                   <CardTitle className="text-sm">Atlas AI</CardTitle>
                   <CardDescription className="text-xs">
-                    {context.trim() ? "Context-aware mode" : "General assistant"}
+                    {selectedFileName
+                      ? `Chatting with: ${selectedFileName}`
+                      : context.trim()
+                        ? "Context-aware mode"
+                        : "General assistant"}
                   </CardDescription>
                 </div>
               </div>

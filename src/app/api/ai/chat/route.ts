@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { groqCompletion } from "@/lib/groq";
 import { getAuthUser } from "@/lib/supabase/server-client";
+import { resolveContent } from "@/lib/pdf/resolveContent";
 
 /** POST /api/ai/chat — Conversational AI study assistant */
 export async function POST(request: NextRequest) {
@@ -11,8 +12,9 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { context, question, history = [] } = body as {
+    const { context, fileUrl, question, history = [] } = body as {
       context?: string;
+      fileUrl?: string;
       question?: string;
       history?: Array<{ role: "user" | "assistant"; content: string }>;
     };
@@ -24,8 +26,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const systemContent = context
-      ? `You are an intelligent AI study assistant called Atlas. You help students understand study material by answering their questions clearly and thoroughly. Base your answers on the provided study material. If the question is outside the scope of the material, say so politely.\n\nStudy Material Context:\n${context}`
+    // Build the study context from fileUrl and/or pasted text
+    let studyContext = "";
+
+    if (fileUrl) {
+      try {
+        const resolved = await resolveContent({ fileUrl });
+        studyContext = resolved.text;
+      } catch (err) {
+        console.error("[api/ai/chat] Failed to resolve file:", err);
+        return NextResponse.json(
+          { error: "Failed to read the uploaded file. Please try again." },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Append any pasted text context (user may provide both)
+    if (context && context.trim()) {
+      studyContext = studyContext
+        ? `${studyContext}\n\n--- Additional Context ---\n${context.trim()}`
+        : context.trim();
+    }
+
+    const systemContent = studyContext
+      ? `You are an intelligent AI study assistant called Atlas. You help students understand study material by answering their questions clearly and thoroughly. Base your answers on the provided study material. If the question is outside the scope of the material, say so politely.\n\nStudy Material Context:\n${studyContext}`
       : `You are an intelligent AI study assistant called Atlas. You help students with their studies by answering questions clearly and thoroughly. Provide accurate, well-structured answers.`;
 
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
