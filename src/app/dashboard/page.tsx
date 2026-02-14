@@ -9,8 +9,19 @@ import {
   MessageSquare,
   Upload,
   ArrowRight,
+  Flame,
+  Trophy,
+  CalendarDays,
+  Bot,
 } from "lucide-react";
 import { createSupabaseServerClient, getAuthUser } from "@/lib/supabase/server-client";
+import type { DashboardStats, WeeklyChartPoint } from "@/types/study";
+import { calculateStreak } from "@/lib/streak";
+import { generateStudyInsight } from "@/lib/insights";
+import { WeeklySessionsChart } from "@/components/dashboard/WeeklySessionsChart";
+
+/** Force fresh data on every request — prevents Next.js from caching stale stats */
+export const dynamic = "force-dynamic";
 
 const tools = [
   {
@@ -79,35 +90,112 @@ const tools = [
   },
 ];
 
-export default async function DashboardPage() {
-  // Fetch real stats from Supabase
-  let studySessionCount = 0;
-  let quizzesTaken = 0;
-  let flashcardsCreated = 0;
+interface DashboardData {
+  stats: DashboardStats;
+  weeklyChart: WeeklyChartPoint[];
+  insight: string;
+}
+
+/** Fetch all dashboard analytics for the authenticated user */
+async function getDashboardData(): Promise<DashboardData> {
+  const defaults: DashboardData = {
+    stats: {
+      studySessions: 0,
+      weeklyStudySessions: 0,
+      currentStreak: 0,
+      longestStreak: 0,
+    },
+    weeklyChart: [],
+    insight: generateStudyInsight({
+      thisWeekSessions: 0,
+      lastWeekSessions: 0,
+      currentStreak: 0,
+      totalSessions: 0,
+    }),
+  };
 
   const user = await getAuthUser();
-  if (user) {
-    const supabase = createSupabaseServerClient();
+  if (!user) return defaults;
 
-    const [sessionsRes, quizzesRes, flashcardsRes] = await Promise.all([
-      supabase
-        .from("study_sessions")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id),
-      supabase
-        .from("quiz_history")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id),
-      supabase
-        .from("flashcards")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id),
-    ]);
+  const supabase = createSupabaseServerClient();
 
-    studySessionCount = sessionsRes.count ?? 0;
-    quizzesTaken = quizzesRes.count ?? 0;
-    flashcardsCreated = flashcardsRes.count ?? 0;
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 86_400_000).toISOString();
+  const twoWeeksAgo = new Date(now.getTime() - 14 * 86_400_000).toISOString();
+
+  const [totalRes, weeklyRes, prevWeekRes, allSessionsRes] = await Promise.all([
+    // Total study sessions
+    supabase
+      .from("study_sessions")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id),
+    // This week's sessions (with created_at for chart grouping)
+    supabase
+      .from("study_sessions")
+      .select("created_at")
+      .eq("user_id", user.id)
+      .gte("created_at", weekAgo),
+    // Previous week's sessions count (for insight comparison)
+    supabase
+      .from("study_sessions")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .gte("created_at", twoWeeksAgo)
+      .lt("created_at", weekAgo),
+    // All sessions (for streak calculation)
+    supabase
+      .from("study_sessions")
+      .select("created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true }),
+  ]);
+
+  const allSessions = allSessionsRes.data ?? [];
+  const weeklySessions = weeklyRes.data ?? [];
+
+  // --- Streak ---
+  const { currentStreak, longestStreak } = calculateStreak(allSessions);
+
+  // --- Weekly chart: group last 7 days ---
+  const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weeklyChart: WeeklyChartPoint[] = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 86_400_000);
+    const dateStr = d.toISOString().slice(0, 10);
+    const count = weeklySessions.filter(
+      (s) => new Date(s.created_at).toISOString().slice(0, 10) === dateStr
+    ).length;
+    weeklyChart.push({
+      day: dayLabels[d.getUTCDay()],
+      sessions: count,
+    });
   }
+
+  // --- Insight ---
+  const thisWeekCount = weeklySessions.length;
+  const lastWeekCount = prevWeekRes.count ?? 0;
+  const insight = generateStudyInsight({
+    thisWeekSessions: thisWeekCount,
+    lastWeekSessions: lastWeekCount,
+    currentStreak,
+    totalSessions: totalRes.count ?? 0,
+  });
+
+  return {
+    stats: {
+      studySessions: totalRes.count ?? 0,
+      weeklyStudySessions: thisWeekCount,
+      currentStreak,
+      longestStreak,
+    },
+    weeklyChart,
+    insight,
+  };
+}
+
+export default async function DashboardPage() {
+  const { stats, weeklyChart, insight } = await getDashboardData();
 
   return (
     <div className="space-y-8">
@@ -153,20 +241,61 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      {/* Quick Stats */}
+      {/* Streak + Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
         <div className="p-5 rounded-xl border border-border/50 bg-card/50">
-          <p className="text-sm text-muted-foreground">Study Sessions</p>
-          <p className="text-2xl font-bold mt-1">{studySessionCount}</p>
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <BookOpen className="h-4 w-4" />
+            <p className="text-sm">Study Sessions</p>
+          </div>
+          <p className="text-2xl font-bold mt-1">{stats.studySessions}</p>
         </div>
-        <div className="p-5 rounded-xl border border-border/50 bg-card/50">
-          <p className="text-sm text-muted-foreground">Quizzes Taken</p>
-          <p className="text-2xl font-bold mt-1">{quizzesTaken}</p>
+        <div className="p-5 rounded-xl border border-orange-500/20 bg-orange-500/5">
+          <div className="flex items-center gap-2 text-orange-400">
+            <Flame className="h-4 w-4" />
+            <p className="text-sm">Current Streak</p>
+          </div>
+          <p className="text-2xl font-bold mt-1 text-orange-400">
+            {stats.currentStreak} {stats.currentStreak === 1 ? "Day" : "Days"}
+          </p>
         </div>
-        <div className="p-5 rounded-xl border border-border/50 bg-card/50">
-          <p className="text-sm text-muted-foreground">Flashcards Created</p>
-          <p className="text-2xl font-bold mt-1">{flashcardsCreated}</p>
+        <div className="p-5 rounded-xl border border-amber-500/20 bg-amber-500/5">
+          <div className="flex items-center gap-2 text-amber-400">
+            <Trophy className="h-4 w-4" />
+            <p className="text-sm">Longest Streak</p>
+          </div>
+          <p className="text-2xl font-bold mt-1 text-amber-400">
+            {stats.longestStreak} {stats.longestStreak === 1 ? "Day" : "Days"}
+          </p>
         </div>
+      </div>
+
+      {/* Weekly Activity Overview */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <CalendarDays className="h-4 w-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+            This Week
+          </h3>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="p-4 rounded-xl border border-neon-cyan/20 bg-neon-cyan/5">
+            <p className="text-xs text-muted-foreground">Sessions This Week</p>
+            <p className="text-xl font-bold mt-1 text-neon-cyan">{stats.weeklyStudySessions}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Weekly Sessions Chart */}
+      <WeeklySessionsChart data={weeklyChart} />
+
+      {/* AI Study Insight */}
+      <div className="rounded-xl border border-border/50 bg-card/50 p-6">
+        <div className="flex items-center gap-2 mb-3">
+          <Bot className="h-5 w-5 text-neon-cyan" />
+          <h3 className="text-sm font-semibold">AI Study Insight</h3>
+        </div>
+        <p className="text-sm text-muted-foreground leading-relaxed">{insight}</p>
       </div>
     </div>
   );

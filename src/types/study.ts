@@ -17,7 +17,22 @@ export interface StudySessionRow {
   title: string;
   content_type: StudyContentType;
   result_data: Record<string, unknown> | null;
+  duration_minutes: number;
   created_at: string;
+}
+
+/** Dashboard analytics shape returned by the server component */
+export interface DashboardStats {
+  studySessions: number;
+  weeklyStudySessions: number;
+  currentStreak: number;
+  longestStreak: number;
+}
+
+/** Single data point for the weekly sessions chart */
+export interface WeeklyChartPoint {
+  day: string;
+  sessions: number;
 }
 
 /** The JSON blob stored in the `result_data` column for summaries */
