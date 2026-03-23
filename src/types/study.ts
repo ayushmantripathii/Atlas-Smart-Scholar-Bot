@@ -35,6 +35,18 @@ export interface WeeklyChartPoint {
   sessions: number;
 }
 
+export interface QuizGraphPoint {
+  timestamp: string;
+  dateLabel: string;
+  score: number;
+}
+
+export interface DashboardQuizStats {
+  totalQuizzes: number;
+  averageScore: number;
+  lastFiveAttempts: QuizGraphPoint[];
+}
+
 /** The JSON blob stored in the `result_data` column for summaries */
 export interface SummaryResultData {
   summary: string;

@@ -19,6 +19,9 @@ import type { DashboardStats, WeeklyChartPoint } from "@/types/study";
 import { calculateStreak } from "@/lib/streak";
 import { generateStudyInsight } from "@/lib/insights";
 import { WeeklySessionsChart } from "@/components/dashboard/WeeklySessionsChart";
+import { getDashboardStats } from "@/lib/dashboard";
+import { QuizAttemptsChart } from "@/components/dashboard/QuizAttemptsChart";
+import type { DashboardQuizStats } from "@/types/study";
 
 /** Force fresh data on every request — prevents Next.js from caching stale stats */
 export const dynamic = "force-dynamic";
@@ -94,6 +97,7 @@ interface DashboardData {
   stats: DashboardStats;
   weeklyChart: WeeklyChartPoint[];
   insight: string;
+  quizStats: DashboardQuizStats;
 }
 
 /** Fetch all dashboard analytics for the authenticated user */
@@ -112,6 +116,11 @@ async function getDashboardData(): Promise<DashboardData> {
       currentStreak: 0,
       totalSessions: 0,
     }),
+    quizStats: {
+      totalQuizzes: 0,
+      averageScore: 0,
+      lastFiveAttempts: [],
+    },
   };
 
   const user = await getAuthUser();
@@ -123,7 +132,7 @@ async function getDashboardData(): Promise<DashboardData> {
   const weekAgo = new Date(now.getTime() - 7 * 86_400_000).toISOString();
   const twoWeeksAgo = new Date(now.getTime() - 14 * 86_400_000).toISOString();
 
-  const [totalRes, weeklyRes, prevWeekRes, allSessionsRes] = await Promise.all([
+  const [totalRes, weeklyRes, prevWeekRes, allSessionsRes, quizStats] = await Promise.all([
     // Total study sessions
     supabase
       .from("study_sessions")
@@ -148,6 +157,7 @@ async function getDashboardData(): Promise<DashboardData> {
       .select("created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: true }),
+    getDashboardStats(),
   ]);
 
   const allSessions = allSessionsRes.data ?? [];
@@ -191,11 +201,12 @@ async function getDashboardData(): Promise<DashboardData> {
     },
     weeklyChart,
     insight,
+    quizStats,
   };
 }
 
 export default async function DashboardPage() {
-  const { stats, weeklyChart, insight } = await getDashboardData();
+  const { stats, weeklyChart, insight, quizStats } = await getDashboardData();
 
   return (
     <div className="space-y-8">
@@ -270,6 +281,18 @@ export default async function DashboardPage() {
         </div>
       </div>
 
+      {/* Quiz Performance */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-5 rounded-xl border border-cyan-500/20 bg-cyan-500/5">
+          <p className="text-sm text-cyan-300">Total Quizzes Taken</p>
+          <p className="text-2xl font-bold mt-1 text-cyan-200">{quizStats.totalQuizzes}</p>
+        </div>
+        <div className="p-5 rounded-xl border border-sky-500/20 bg-sky-500/5">
+          <p className="text-sm text-sky-300">Average Score</p>
+          <p className="text-2xl font-bold mt-1 text-sky-200">{quizStats.averageScore}</p>
+        </div>
+      </div>
+
       {/* Weekly Activity Overview */}
       <div>
         <div className="flex items-center gap-2 mb-3">
@@ -288,6 +311,9 @@ export default async function DashboardPage() {
 
       {/* Weekly Sessions Chart */}
       <WeeklySessionsChart data={weeklyChart} />
+
+      {/* Quiz Score Trend */}
+      <QuizAttemptsChart data={quizStats.lastFiveAttempts} />
 
       {/* AI Study Insight */}
       <div className="rounded-xl border border-border/50 bg-card/50 p-6">
